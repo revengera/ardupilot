@@ -135,11 +135,6 @@ static void init_ardupilot()
     gcs[2].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, 1);
 #endif
 
-#if MAVLINK_COMM_NUM_BUFFERS > 3
-    // setup serial port for fourth telemetry port (not used by default)
-    gcs[3].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, 2);
-#endif
-
     // setup frsky
 #if FRSKY_TELEM_ENABLED == ENABLED
     frsky_telemetry.init(serial_manager);
@@ -299,9 +294,6 @@ static void startup_ground(void)
     // ready to fly
     serial_manager.set_blocking_writes_all(false);
 
-    ins.set_raw_logging(should_log(MASK_LOG_IMU_RAW));
-    ins.set_dataflash(&DataFlash);    
-
     gcs_send_text_P(SEVERITY_LOW,PSTR("\n\n Ready to FLY."));
 }
 
@@ -415,11 +407,6 @@ static void set_mode(enum FlightMode mode)
     case GUIDED:
         auto_throttle_mode = true;
         guided_throttle_passthru = false;
-        /*
-          when entering guided mode we set the target as the current
-          location. This matches the behaviour of the copter code
-        */
-        guided_WP_loc = current_loc;
         set_guided_WP();
         break;
     }
@@ -452,7 +439,6 @@ static bool mavlink_set_mode(uint8_t mode)
     case AUTOTUNE:
     case FLY_BY_WIRE_B:
     case CRUISE:
-    case GUIDED:
     case AUTO:
     case RTL:
     case LOITER:

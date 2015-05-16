@@ -242,11 +242,7 @@
 //
 // uses 7726 bytes of memory on 2560 chips (all options are enabled)
 #ifndef MOUNT
-#if HAL_CPU_CLASS > HAL_CPU_CLASS_16
  # define MOUNT          ENABLED
-#else
- # define MOUNT          DISABLED
-#endif
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -457,4 +453,14 @@
 #define FIRMWARE_STRING THISFIRMWARE
 #else
 #define FIRMWARE_STRING THISFIRMWARE " (" GIT_VERSION ")"
+#endif
+
+//Release mechanism
+#ifndef RELEASE_ALTITUDE_DEFAULT
+ # define RELEASE_ALTITUDE_DEFAULT      1000     // default value for my new parameter
+#endif
+
+//Release mechanism activation
+#ifndef RELEASE_ACT_ALT_DEFAULT
+ # define RELEASE_ACT_ALT_DEFAULT      1000     // default value for my new parameter
 #endif

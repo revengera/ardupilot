@@ -1,6 +1,6 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
-#define THISFIRMWARE "ArduPlane V3.3.0beta2"
+#define THISFIRMWARE "ArduPlane V3.3.0beta1"
 /*
    Lead developer: Andrew Tridgell
  
@@ -46,6 +46,7 @@
 #include <AP_InertialSensor.h> // Inertial Sensor Library
 #include <AP_AHRS.h>         // ArduPilot Mega DCM Library
 #include <RC_Channel.h>     // RC Channel Library
+#include <RC_Channel_aux.h>
 #include <AP_RangeFinder.h>     // Range finder library
 #include <Filter.h>                     // Filter library
 #include <AP_Buffer.h>      // APM FIFO Buffer
@@ -103,7 +104,7 @@ static AP_Vehicle::FixedWing aparm;
 #include "Parameters.h"
 
 #include <AP_HAL_AVR.h>
-#include <AP_HAL_SITL.h>
+#include <AP_HAL_AVR_SITL.h>
 #include <AP_HAL_PX4.h>
 #include <AP_HAL_FLYMAPLE.h>
 #include <AP_HAL_Linux.h>
@@ -152,8 +153,6 @@ static void update_events(void);
 void gcs_send_text_fmt(const prog_char_t *fmt, ...);
 static void print_flight_mode(AP_HAL::BetterStream *port, uint8_t mode);
 static bool arm_motors(AP_Arming::ArmingMethod method);
-static bool create_mixer_file(const char *filename);
-static bool setup_failsafe_mixing(void);
 
 ////////////////////////////////////////////////////////////////////////////////
 // DataFlash
@@ -188,9 +187,17 @@ static int32_t pitch_limit_min_cd;
 // - HIL Sensors mode.  Synthetic sensors are configured that
 //   supply data from the simulation.
 //
+/////////////////////////////////////////////////////////////////////////////////
+// Release mechanism program
+/////////////////////////////////////////////////////////////////////////////////
+int32_t alt_temp;
+int32_t maxalt=0;
+bool descendpass=false;
+/////////////////////////////////////////////////////////////////////////////////
 
 // GPS driver
 static AP_GPS gps;
+static RangeFinder rng;
 
 // flight modes convenience array
 static AP_Int8          *flight_modes = &g.flight_mode1;
@@ -205,11 +212,9 @@ AP_ADC_ADS7844 apm1_adc;
 
 AP_InertialSensor ins;
 
-static RangeFinder rangefinder;
-
 // Inertial Navigation EKF
 #if AP_AHRS_NAVEKF_AVAILABLE
-AP_AHRS_NavEKF ahrs(ins, barometer, gps, rangefinder);
+AP_AHRS_NavEKF ahrs(ins, barometer, gps, rng);
 #else
 AP_AHRS_DCM ahrs(ins, barometer, gps);
 #endif
@@ -223,7 +228,7 @@ static AP_PitchController pitchController(ahrs, aparm, DataFlash);
 static AP_YawController   yawController(ahrs, aparm);
 static AP_SteerController steerController(ahrs);
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if CONFIG_HAL_BOARD == HAL_BOARD_AVR_SITL
 SITL sitl;
 #endif
 
@@ -268,6 +273,11 @@ static AP_SpdHgtControl *SpdHgt_Controller = &TECS_controller;
 
 // a pin for reading the receiver RSSI voltage. 
 static AP_HAL::AnalogSource *rssi_analog_source;
+
+////////////////////////////////////////////////////////////////////////////////
+// rangefinder
+////////////////////////////////////////////////////////////////////////////////
+static RangeFinder rangefinder;
 
 static struct {
     bool in_range;
@@ -659,8 +669,6 @@ static struct {
 // A value used in condition commands (eg delay, change alt, etc.)
 // For example in a change altitude command, it is the altitude to change to.
 static int32_t condition_value;
-// Sometimes there is a second condition required:
-static int32_t condition_value2;
 // A starting value used to check the status of a conditional command.
 // For example in a delay command the condition_start records that start time for the delay
 static uint32_t condition_start;
@@ -1039,12 +1047,6 @@ static void one_second_loop()
         terrain.log_terrain_data(DataFlash);
     }
 #endif
-    // piggyback the status log entry on the MODE log entry flag
-    if (should_log(MASK_LOG_MODE)) {
-        Log_Write_Status();
-    }
-
-    ins.set_raw_logging(should_log(MASK_LOG_IMU_RAW));
 }
 
 static void log_perf_info()
@@ -1197,6 +1199,7 @@ static void handle_auto_mode(void)
     // we should be either running a mission or RTLing home
     if (mission.state() == AP_Mission::MISSION_RUNNING) {
         nav_cmd_id = mission.get_current_nav_cmd().id;
+		
     }else{
         nav_cmd_id = auto_rtl_command.id;
     }
@@ -1217,6 +1220,12 @@ static void handle_auto_mode(void)
             // during final approach constrain roll to the range
             // allowed for level flight
             nav_roll_cd = constrain_int32(nav_roll_cd, -g.level_roll_limit*100UL, g.level_roll_limit*100UL);
+        } else {
+            if (!ahrs.airspeed_sensor_enabled()) {
+                // when not under airspeed control, don't allow
+                // down pitch in landing
+                nav_pitch_cd = constrain_int32(nav_pitch_cd, 0, nav_pitch_cd);
+            }
         }
         calc_throttle();
         
@@ -1230,6 +1239,12 @@ static void handle_auto_mode(void)
     default:
         // we are doing normal AUTO flight, the special cases
         // are for takeoff and landing
+		//float altitudech;
+		//altitudech = current_loc.alt;
+		//gps.location().altitude
+		
+		
+		//gps.current_loc.alt
         steer_state.hold_course_cd = -1;
         auto_state.land_complete = false;
         auto_state.land_sink_rate = 0;
@@ -1365,7 +1380,7 @@ static void update_flight_mode(void)
           roll when heading is locked. Heading becomes unlocked on
           any aileron or rudder input
         */
-        if ((channel_roll->control_in != 0 ||
+        /*if ((channel_roll->control_in != 0 ||
              rudder_input != 0)) {                
             cruise_state.locked_heading = false;
             cruise_state.lock_timer_ms = 0;
@@ -1378,7 +1393,8 @@ static void update_flight_mode(void)
         } else {
             calc_nav_roll();
         }
-        update_fbwb_speed_height();
+        update_fbwb_speed_height();*/
+		releasestate();
         break;
         
     case STABILIZE:
@@ -1404,6 +1420,8 @@ static void update_flight_mode(void)
         channel_roll->servo_out = channel_roll->pwm_to_angle();
         channel_pitch->servo_out = channel_pitch->pwm_to_angle();
         steering_control.steering = steering_control.rudder = channel_rudder->pwm_to_angle();
+		release_state_manual();
+		
         break;
         //roll: -13788.000,  pitch: -13698.000,   thr: 0.000, rud: -13742.000
         
@@ -1412,7 +1430,49 @@ static void update_flight_mode(void)
         break;
     }
 }
+static void releasestate()
+{
+		////////////////////////////////////////////////////////////////////////////////////////////////////
+		//Release mechanism 13/5/2015
+		//check the altitude difference between max altitude, if descend to descend distance release payload
+		////////////////////////////////////////////////////////////////////////////////////////////////////
+		alt_temp=gps.location().alt;
+		int descend_distance=200*100;
+		if(maxalt>alt_temp-descend_distance)
+		{
+		descendpass=true;
+		}
+		else
+		{ 
+		maxalt=alt_temp;
+		}
+		//RC_Channel_aux::set_radio(RC_Channel_aux::channel_function(7),g.release_altitude);
+		/////////////////////////////////////////////////////////////////////////////////////////////////////
+		//check if altitude reach release payload
+		/////////////////////////////////////////////////////////////////////////////////////////////////////
+		if(gps.location().alt<g.release_altitude*100)
+		{
+		//RC_Channel_aux::set_radio_to_max(RC_Channel_aux::channel_function(6));
+		RC_Channel_aux::set_radio(RC_Channel_aux::channel_function(6),1900);
+		//RC_Channel_i::set_radio(RC_Channel_i::channel_function(4),1235);
+		control_mode=AUTO;
+		mission.start();
+		}
+		if(gps.location().alt>g.release_altitude*100)
+		{
+		//RC_Channel_aux::set_radio_to_min(RC_Channel_aux::channel_function(6));
+		RC_Channel_aux::set_radio(RC_Channel_aux::channel_function(6),1000);
+		}
+		//////////////////////////////////////////////////////////////////////////////////////////////////////
+}
 
+static void release_state_manual()
+{
+	if(gps.location().alt>g.release_activate_altitude*100)
+		{
+		control_mode=CRUISE;
+		}
+}
 static void update_navigation()
 {
     // wp_distance is in ACTUAL meters, not the *100 meters we get from the GPS
@@ -1425,20 +1485,11 @@ static void update_navigation()
         break;
             
     case RTL:
-        if (g.rtl_autoland == 1 &&
+        if (g.rtl_autoland && 
             !auto_state.checked_for_autoland &&
             nav_controller->reached_loiter_target() && 
             labs(altitude_error_cm) < 1000) {
             // we've reached the RTL point, see if we have a landing sequence
-            jump_to_landing_sequence();
-
-            // prevent running the expensive jump_to_landing_sequence
-            // on every loop
-            auto_state.checked_for_autoland = true;
-        }
-        else if (g.rtl_autoland == 2 &&
-            !auto_state.checked_for_autoland) {
-            // Go directly to the landing sequence
             jump_to_landing_sequence();
 
             // prevent running the expensive jump_to_landing_sequence
@@ -1491,12 +1542,6 @@ static void set_flight_stage(AP_SpdHgtControl::FlightStage fs)
                 gcs_send_text_P(SEVERITY_HIGH, PSTR("Disable fence failed (autodisable)"));
             } else {
                 gcs_send_text_P(SEVERITY_HIGH, PSTR("Fence disabled (autodisable)"));
-            }
-        } else if (g.fence_autoenable == 2) {
-            if (! geofence_set_floor_enabled(false)) {
-                gcs_send_text_P(SEVERITY_HIGH, PSTR("Disable fence floor failed (autodisable)"));
-            } else {
-                gcs_send_text_P(SEVERITY_HIGH, PSTR("Fence floor disabled (auto disable)"));
             }
         }
 #endif

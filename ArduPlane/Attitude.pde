@@ -286,7 +286,7 @@ static void stabilize_acro(float speed_scaler)
     /*
       check for special roll handling near the pitch poles
      */
-    if (g.acro_locking && is_zero(roll_rate)) {
+    if (g.acro_locking && roll_rate == 0) {
         /*
           we have no roll stick input, so we will enter "roll locked"
           mode, and hold the roll we had when the stick was released
@@ -313,7 +313,7 @@ static void stabilize_acro(float speed_scaler)
         channel_roll->servo_out  = rollController.get_rate_out(roll_rate,  speed_scaler);
     }
 
-    if (g.acro_locking && is_zero(pitch_rate)) {
+    if (g.acro_locking && pitch_rate == 0) {
         /*
           user has zero pitch stick input, so we lock pitch at the
           point they release the stick
@@ -459,7 +459,7 @@ static void calc_nav_yaw_ground(void)
     if (flight_stage == AP_SpdHgtControl::FLIGHT_TAKEOFF) {
         steer_rate = 0;
     }
-    if (!is_zero(steer_rate)) {
+    if (steer_rate != 0) {
         // pilot is giving rudder input
         steer_state.locked_course = false;        
     } else if (!steer_state.locked_course) {
@@ -588,7 +588,7 @@ static bool suppress_throttle(void)
         // we're more than 10m from the home altitude
         throttle_suppressed = false;
         gcs_send_text_fmt(PSTR("Throttle unsuppressed - altitude %.2f"), 
-                          (double)(relative_altitude_abs_cm()*0.01f));
+                          (float)(relative_altitude_abs_cm()*0.01f));
         return false;
     }
 
@@ -600,8 +600,8 @@ static bool suppress_throttle(void)
         if ((!ahrs.airspeed_sensor_enabled()) || airspeed.get_airspeed() >= 5) {
             // we're moving at more than 5 m/s
             gcs_send_text_fmt(PSTR("Throttle unsuppressed - speed %.2f airspeed %.2f"), 
-                              (double)gps.ground_speed(),
-                              (double)airspeed.get_airspeed());
+                              gps.ground_speed(),
+                              airspeed.get_airspeed());
             throttle_suppressed = false;
             return false;        
         }
@@ -1026,7 +1026,7 @@ static void update_load_factor(void)
         // limit to 85 degrees to prevent numerical errors
         demanded_roll = 85;
     }
-    aerodynamic_load_factor = 1.0f / safe_sqrt(cosf(radians(demanded_roll)));
+    aerodynamic_load_factor = 1.0f / safe_sqrt(cos(radians(demanded_roll)));
 
     if (!aparm.stall_prevention) {
         // stall prevention is disabled

@@ -224,7 +224,7 @@ static NOINLINE void send_extended_status1(mavlink_channel_t chan)
         // AHRS subsystem is unhealthy
         control_sensors_health &= ~MAV_SYS_STATUS_AHRS;
     }
-    if (ahrs.have_inertial_nav() && !ins.accel_calibrated_ok_all()) {
+    if (ahrs.have_inertial_nav() && !ins.calibrated()) {
         // trying to use EKF without properly calibrated accelerometers
         control_sensors_health &= ~MAV_SYS_STATUS_AHRS;
     }
@@ -429,7 +429,7 @@ static mavlink_hil_state_t last_hil_state;
 // report simulator state
 static void NOINLINE send_simstate(mavlink_channel_t chan)
 {
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if CONFIG_HAL_BOARD == HAL_BOARD_AVR_SITL
     sitl.simstate_send(chan);
 #else
     if (g.hil_mode == 1) {
@@ -960,10 +960,6 @@ GCS_MAVLINK::data_stream_send(void)
  */
 void GCS_MAVLINK::handle_guided_request(AP_Mission::Mission_Command &cmd)
 {
-    if (control_mode != GUIDED) {
-        // only accept position updates when in GUIDED mode
-        return;
-    }
     guided_WP_loc = cmd.content.location;
     
     // add home alt if needed
@@ -972,6 +968,9 @@ void GCS_MAVLINK::handle_guided_request(AP_Mission::Mission_Command &cmd)
         guided_WP_loc.flags.relative_alt = 0;
     }
 
+    set_mode(GUIDED);
+
+    // make any new wp uploaded instant (in case we are already in Guided mode)
     set_guided_WP();
 }
 
@@ -1050,7 +1049,7 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
 
         case MAV_CMD_PREFLIGHT_CALIBRATION:
             in_calibration = true;
-            if (is_equal(packet.param1,1.0f)) {
+            if (packet.param1 == 1) {
                 ins.init_gyro();
                 if (ins.gyro_calibrated_ok_all()) {
                     ahrs.reset_gyro_drift();
@@ -1058,16 +1057,16 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
                 } else {
                     result = MAV_RESULT_FAILED;
                 }
-            } else if (is_equal(packet.param3,1.0f)) {
+            } else if (packet.param3 == 1) {
                 init_barometer();
                 if (airspeed.enabled()) {
                     zero_airspeed(false);
                 }
                 result = MAV_RESULT_ACCEPTED;
-            } else if (is_equal(packet.param4,1.0f)) {
+            } else if (packet.param4 == 1) {
                 trim_radio();
                 result = MAV_RESULT_ACCEPTED;
-            } else if (is_equal(packet.param5,1.0f)) {
+            } else if (packet.param5 == 1) {
                 float trim_roll, trim_pitch;
                 AP_InertialSensor_UserInteract_MAVLink interact(this);
                 if (g.skip_gyro_cal) {
@@ -1082,16 +1081,6 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
                 } else {
                     result = MAV_RESULT_FAILED;
                 }
-            } else if (is_equal(packet.param5,2.0f)) {
-                // accel trim
-                float trim_roll, trim_pitch;
-                if(ins.calibrate_trim(trim_roll, trim_pitch)) {
-                    // reset ahrs's trim to suggested values from calibration routine
-                    ahrs.set_trim(Vector3f(trim_roll, trim_pitch, 0));
-                    result = MAV_RESULT_ACCEPTED;
-                } else {
-                    result = MAV_RESULT_FAILED;
-                }
             }
             else {
                     send_text_P(SEVERITY_LOW, PSTR("Unsupported preflight calibration"));
@@ -1100,12 +1089,12 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
             break;
 
         case MAV_CMD_PREFLIGHT_SET_SENSOR_OFFSETS:
-            if (is_equal(packet.param1,2.0f)) {
+            if (packet.param1 == 2) {
                 // save first compass's offsets
                 compass.set_and_save_offsets(0, packet.param2, packet.param3, packet.param4);
                 result = MAV_RESULT_ACCEPTED;
             }
-            if (is_equal(packet.param1,5.0f)) {
+            if (packet.param1 == 5) {
                 // save secondary compass's offsets
                 compass.set_and_save_offsets(1, packet.param2, packet.param3, packet.param4);
                 result = MAV_RESULT_ACCEPTED;
@@ -1113,14 +1102,14 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
             break;
 
         case MAV_CMD_COMPONENT_ARM_DISARM:
-            if (is_equal(packet.param1,1.0f)) {
+            if (packet.param1 == 1.0f) {
                 // run pre_arm_checks and arm_checks and display failures
                 if (arm_motors(AP_Arming::MAVLINK)) {
                     result = MAV_RESULT_ACCEPTED;
                 } else {
                     result = MAV_RESULT_FAILED;
                 }
-            } else if (is_zero(packet.param1))  {
+            } else if (packet.param1 == 0.0f)  {
                 if (disarm_motors()) {
                     result = MAV_RESULT_ACCEPTED;
                 } else {
@@ -1181,9 +1170,9 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
             break;
 
         case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
-            if (is_equal(packet.param1,1.0f) || is_equal(packet.param1,3.0f)) {
+            if (packet.param1 == 1 || packet.param1 == 3) {
                 // when packet.param1 == 3 we reboot to hold in bootloader
-                hal.scheduler->reboot(is_equal(packet.param1,3.0f));
+                hal.scheduler->reboot(packet.param1 == 3);
                 result = MAV_RESULT_ACCEPTED;
             }
             break;
@@ -1225,27 +1214,20 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
                     if (! geofence_set_enabled(false, GCS_TOGGLED)) {
                         result = MAV_RESULT_FAILED;
                     }
-                    break;
+                break;
                 case 1:
                     if (! geofence_set_enabled(true, GCS_TOGGLED)) {
                         result = MAV_RESULT_FAILED; 
                     }
-                    break;
-                case 2: //disable fence floor only 
-                    if (! geofence_set_floor_enabled(false)) {
-                        result = MAV_RESULT_FAILED;
-                    } else {
-                        gcs_send_text_P(SEVERITY_HIGH,PSTR("Fence floor disabled."));
-                    }
-                    break;
+                break;
                 default:
                     result = MAV_RESULT_FAILED;
-                    break;
+                break;
             }
             break;
 
         case MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES: {
-            if (is_equal(packet.param1,1.0f)) {
+            if (packet.param1 == 1) {
                 gcs[chan-MAVLINK_COMM_0].send_autopilot_version();
                 result = MAV_RESULT_ACCEPTED;
             }
@@ -1257,10 +1239,10 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
             // param6 : longitude
             // param7 : altitude (absolute)
             result = MAV_RESULT_FAILED; // assume failure
-            if (is_equal(packet.param1,1.0f)) {
+            if (packet.param1 == 1) {
                 init_home();
             } else {
-                if (is_zero(packet.param5) && is_zero(packet.param6) && is_zero(packet.param7)) {
+                if (packet.param5 == 0 && packet.param6 == 0 && packet.param7 == 0) {
                     // don't allow the 0,0 position
                     break;
                 }
@@ -1370,9 +1352,7 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
     // GCS has sent us a command from GCS, store to EEPROM
     case MAVLINK_MSG_ID_MISSION_ITEM:
     {
-        if (handle_mission_item(msg, mission)) {
-            Log_Write_EntireMission();
-        }
+        handle_mission_item(msg, mission);
         break;
     }
 
@@ -1403,7 +1383,7 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
         } else {
             Vector2l point = get_fence_point_with_index(packet.idx);
             mavlink_msg_fence_point_send_buf(msg, chan, msg->sysid, msg->compid, packet.idx, g.fence_total,
-                                             point.x*1.0e-7f, point.y*1.0e-7f);
+                                             point.x*1.0e-7, point.y*1.0e-7);
         }
         break;
     }
@@ -1544,8 +1524,7 @@ void GCS_MAVLINK::handleMessage(mavlink_message_t* msg)
         ins.set_accel(0, accels);
 
         barometer.setHIL(packet.alt*0.001f);
-        compass.setHIL(0, packet.roll, packet.pitch, packet.yaw);
-        compass.setHIL(1, packet.roll, packet.pitch, packet.yaw);
+        compass.setHIL(packet.roll, packet.pitch, packet.yaw);
 
         // cope with DCM getting badly off due to HIL lag
         if (g.hil_err_limit > 0 &&

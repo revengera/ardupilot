@@ -137,7 +137,10 @@ public:
         k_param_land_disarm_delay,
         k_param_glide_slope_threshold,
         k_param_rudder_only,
-        k_param_gcs3,            // 93
+		
+		//added for release mechanism altitude 13/5/2015
+		k_param_release_altitude,
+		k_param_release_activate_altitude,
 
         // 100: Arming parameters
         k_param_arming = 100,
@@ -322,7 +325,7 @@ public:
 
     AP_Int16 format_version;
     AP_Int8 software_type;
-
+    
     // Telemetry control
     //
     AP_Int16 sysid_this_mav;
@@ -335,7 +338,11 @@ public:
     AP_Float hil_err_limit;
 
     AP_Int8  rtl_autoland;
-
+	
+	//release control mechanism
+    AP_Int32 release_altitude;				//this is to set altitude for release  13/5/2015
+	AP_Int32 release_activate_altitude;
+	
     AP_Int8  trim_rc_at_start;
 
     // Feed-forward gains

@@ -25,8 +25,8 @@ const AP_Param::Info var_info[] PROGMEM = {
     GSCALAR(software_type,          "SYSID_SW_TYPE",  Parameters::k_software_type),
 
     // @Param: SYSID_THISMAV
-    // @DisplayName: MAVLink system ID of this vehicle
-    // @Description: Allows setting an individual MAVLink system id for this vehicle to distinguish it from others on the same network
+    // @DisplayName: MAVLink system ID
+    // @Description: The identifier of this device in the MAVLink protocol
     // @Range: 1 255
     // @User: Advanced
     GSCALAR(sysid_this_mav,         "SYSID_THISMAV",  MAV_SYSTEM_ID),
@@ -235,7 +235,7 @@ const AP_Param::Info var_info[] PROGMEM = {
 
     // @Param: LAND_FLARE_SEC
     // @DisplayName: Landing flare time
-    // @Description: Vertical time before landing point at which to lock heading and flare with the motor stopped. This is vertical time, and is calculated based solely on the current height above the ground and the current descent rate.  Set to 0 if you only wish to flare based on altitude (see LAND_FLARE_ALT).
+    // @Description: Vertical time before landing point at which to lock heading and flare with the motor stopped. This is vertical time, and is calculated based solely on the current height above the ground and the current descent rate.
     // @Units: seconds
     // @Increment: 0.1
     // @User: Advanced
@@ -358,8 +358,8 @@ const AP_Param::Info var_info[] PROGMEM = {
 
     // @Param: FENCE_AUTOENABLE
     // @DisplayName: Fence automatic enable
-    // @Description: When set to 1, gefence automatically enables after an auto takeoff and automatically disables at the beginning of an auto landing.  When on the ground before takeoff the fence is disabled.  When set to 2, the fence autoenables after an auto takeoff, but only disables the fence floor during landing. It is highly recommended to not use this option for line of sight flying and use a fence enable channel instead.
-    // @Values: 0:NoAutoEnable,1:AutoEnable,2:AutoEnableDisableFloorOnly
+    // @Description: When set to 1, gefence automatically enables after an auto takeoff and automatically disables at the beginning of an auto landing.  When on the ground before takeoff the fence is disabled. It is highly recommended to not use this option for line of sight flying and use a fence enable channel instead.
+    // @Values: 0:NoAutoEnable,1:AutoEnable
     // @User: Standard
     GSCALAR(fence_autoenable,       "FENCE_AUTOENABLE", 0),
 
@@ -949,7 +949,7 @@ const AP_Param::Info var_info[] PROGMEM = {
     // @Param: RTL_AUTOLAND
     // @DisplayName: RTL auto land
     // @Description: Automatically begin landing sequence after arriving at RTL location. This requires the addition of a DO_LAND_START mission item, which acts as a marker for the start of a landing sequence. The closest landing sequence will be chosen to the current location. 
-    // @Values: 0:Disable,1:Enable - go HOME then land,2:Enable - go directly to landing sequence
+    // @Values: 0:Disable,1:Enable
     // @User: Standard
     GSCALAR(rtl_autoland,         "RTL_AUTOLAND",   0),
 
@@ -970,6 +970,20 @@ const AP_Param::Info var_info[] PROGMEM = {
     // @Group: GPS_
     // @Path: ../libraries/AP_GPS/AP_GPS.cpp
     GOBJECT(gps, "GPS_", AP_GPS),
+	
+	// @Param: RELEASE_ALTITUDE
+    // @DisplayName: Mechanism release altitude
+    // @Description: The altitude is altitude for release of the mechanism IN CM.
+    // @Range: -1000000 1000000
+    // @User: Standard
+    GSCALAR(release_altitude, "RELEASE_ALTITUDE", RELEASE_ALTITUDE_DEFAULT),
+	
+	// @Param: RELEASE_ACT_ALT
+    // @DisplayName: Mechanism release activation altitude
+    // @Description: The altitude is altitude for release of the mechanism to start initialize IN M.- it will go into cruise mode as dummy mode.
+    // @Range: -1000000 1000000
+    // @User: Standard
+    GSCALAR(release_activate_altitude, "RELEASE_ACT_ALT", RELEASE_ACT_ALT_DEFAULT),
 
 #if CAMERA == ENABLED
     // @Group: CAM_
@@ -1110,12 +1124,6 @@ const AP_Param::Info var_info[] PROGMEM = {
     GOBJECTN(gcs[2],  gcs2,       "SR2_",     GCS_MAVLINK),
 #endif
 
-#if MAVLINK_COMM_NUM_BUFFERS > 3
-    // @Group: SR3_
-    // @Path: GCS_Mavlink.pde
-    GOBJECTN(gcs[3],  gcs3,       "SR3_",     GCS_MAVLINK),
-#endif
-
     // @Group: INS_
     // @Path: ../libraries/AP_InertialSensor/AP_InertialSensor.cpp
     GOBJECT(ins,                    "INS_", AP_InertialSensor),
@@ -1137,7 +1145,7 @@ const AP_Param::Info var_info[] PROGMEM = {
     GOBJECT(TECS_controller,         "TECS_",   AP_TECS),
 
 #if MOUNT == ENABLED
-    // @Group: MNT
+    // @Group: MNT_
     // @Path: ../libraries/AP_Mount/AP_Mount.cpp
     GOBJECT(camera_mount,           "MNT",  AP_Mount),
 #endif
@@ -1150,7 +1158,7 @@ const AP_Param::Info var_info[] PROGMEM = {
     // @Path: ../libraries/AP_BoardConfig/AP_BoardConfig.cpp
     GOBJECT(BoardConfig,            "BRD_",       AP_BoardConfig),
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if CONFIG_HAL_BOARD == HAL_BOARD_AVR_SITL
     // @Group: SIM_
     // @Path: ../libraries/SITL/SITL.cpp
     GOBJECT(sitl, "SIM_", SITL),

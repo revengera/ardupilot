@@ -13,7 +13,6 @@ static void do_change_alt(const AP_Mission::Mission_Command& cmd);
 static void do_change_speed(const AP_Mission::Mission_Command& cmd);
 static void do_set_home(const AP_Mission::Mission_Command& cmd);
 static void do_continue_and_change_alt(const AP_Mission::Mission_Command& cmd);
-static void do_loiter_to_alt(const AP_Mission::Mission_Command& cmd);
 static bool verify_nav_wp(const AP_Mission::Mission_Command& cmd);
 #if CAMERA == ENABLED
 static void do_digicam_configure(const AP_Mission::Mission_Command& cmd);
@@ -80,10 +79,6 @@ start_command(const AP_Mission::Mission_Command& cmd)
         do_loiter_time(cmd);
         break;
 
-    case MAV_CMD_NAV_LOITER_TO_ALT:
-        do_loiter_to_alt(cmd);
-        break;
-
     case MAV_CMD_NAV_RETURN_TO_LAUNCH:
         set_mode(RTL);
         break;
@@ -148,18 +143,10 @@ start_command(const AP_Mission::Mission_Command& cmd)
 
     case MAV_CMD_DO_FENCE_ENABLE:
 #if GEOFENCE_ENABLED == ENABLED
-        if (cmd.p1 != 2) {
-            if (!geofence_set_enabled((bool) cmd.p1, AUTO_TOGGLED)) {
-                gcs_send_text_fmt(PSTR("Unable to set fence enabled state to %u"), cmd.p1);
-            } else {
-                gcs_send_text_fmt(PSTR("Set fence enabled state to %u"), cmd.p1);
-            }
-        } else { //commanding to only disable floor
-            if (! geofence_set_floor_enabled(false)) {
-                gcs_send_text_fmt(PSTR("Unabled to disable fence floor.\n"));
-            } else {
-                gcs_send_text_fmt(PSTR("Fence floor disabled.\n"));
-            }
+        if (!geofence_set_enabled((bool) cmd.p1, AUTO_TOGGLED)) {
+            gcs_send_text_fmt(PSTR("Unable to set fence enabled state to %u"), cmd.p1);
+        } else {
+            gcs_send_text_fmt(PSTR("Set fence enabled state to %u"), cmd.p1);
         }    
 #endif
         break;
@@ -234,9 +221,6 @@ static bool verify_command(const AP_Mission::Mission_Command& cmd)        // Ret
 
     case MAV_CMD_NAV_LOITER_TIME:
         return verify_loiter_time();
-
-    case MAV_CMD_NAV_LOITER_TO_ALT:
-        return verify_loiter_to_alt();
 
     case MAV_CMD_NAV_RETURN_TO_LAUNCH:
         return verify_RTL();
@@ -382,32 +366,6 @@ static void do_continue_and_change_alt(const AP_Mission::Mission_Command& cmd)
     reset_offset_altitude();
 }
 
-static void do_loiter_to_alt(const AP_Mission::Mission_Command& cmd) 
-{
-    //set target alt  
-    next_WP_loc.alt = cmd.content.location.alt;
-
-    // convert relative alt to absolute alt
-    if (cmd.content.location.flags.relative_alt) {
-        next_WP_loc.flags.relative_alt = false;
-        next_WP_loc.alt += home.alt;
-    }
-
-    //I know I'm storing this twice -- I'm doing that on purpose -- 
-    //see verify_loiter_alt() function
-    condition_value = next_WP_loc.alt;
-    
-    //are lat and lon 0?  if so, don't change the current wp lat/lon
-    if (cmd.content.location.lat != 0 || cmd.content.location.lng != 0) {
-        set_next_WP(cmd.content.location);
-    }
-    //set loiter direction
-    loiter_set_direction_wp(cmd);
-
-    //must the plane be heading towards the next waypoint before breaking?
-    condition_value2 = LOWBYTE(cmd.p1);
-}
-
 /********************************************************************************/
 //  Verify Nav (Must) commands
 /********************************************************************************/
@@ -433,8 +391,8 @@ static bool verify_takeoff()
             steer_state.hold_course_cd = wrap_360_cd(degrees(takeoff_course)*100);
             gcs_send_text_fmt(PSTR("Holding course %ld at %.1fm/s (%.1f)"), 
                               steer_state.hold_course_cd,
-                              (double)gps.ground_speed(),
-                              (double)degrees(steer_state.locked_course_err));
+                              gps.ground_speed(),
+                              degrees(steer_state.locked_course_err));
         }
     }
 
@@ -449,13 +407,13 @@ static bool verify_takeoff()
     int32_t relative_alt_cm = adjusted_relative_altitude_cm();
     if (relative_alt_cm > auto_state.takeoff_altitude_rel_cm) {
         gcs_send_text_fmt(PSTR("Takeoff complete at %.2fm"), 
-                          (double)(relative_alt_cm*0.01f));
+                          relative_alt_cm*0.01f);
         steer_state.hold_course_cd = -1;
         auto_state.takeoff_complete = true;
         next_WP_loc = prev_WP_loc = current_loc;
 
 #if GEOFENCE_ENABLED == ENABLED
-        if (g.fence_autoenable > 0) {
+        if (g.fence_autoenable == 1) {
             if (! geofence_set_enabled(true, AUTO_TOGGLED)) {
                 gcs_send_text_P(SEVERITY_HIGH, PSTR("Enable fence failed (cannot autoenable"));
             } else {
@@ -552,70 +510,6 @@ static bool verify_loiter_turns()
         return true;
     }
     return false;
-}
-
-/*
-  verify a LOITER_TO_ALT command. This involves checking we have
-  reached both the desired altitude and desired heading. The desired
-  altitude only needs to be reached once.
- */
-static bool verify_loiter_to_alt() 
-{
-    update_loiter();
-
-    //has target altitude been reached?
-    if (condition_value != 0) {
-        if (labs(condition_value - current_loc.alt) < 500) {
-            //Only have to reach the altitude once -- that's why I need
-            //this global condition variable.
-            //
-            //This is in case of altitude oscillation when still trying
-            //to reach the target heading.
-            condition_value = 0;
-        } else {
-            return false;
-        }
-    }
-    
-    //has target heading been reached?
-    if (condition_value2 != 0) {
-        //Get the lat/lon of next Nav waypoint after this one:
-        AP_Mission::Mission_Command next_nav_cmd;
-        if (! mission.get_next_nav_cmd(mission.get_current_nav_index() + 1,
-                                       next_nav_cmd)) {
-            //no next waypoint to shoot for -- go ahead and break out of loiter
-            return true;        
-        } 
-
-        // Bearing in radians
-        int32_t bearing_cd = get_bearing_cd(current_loc,next_nav_cmd.content.location);
-
-        // get current heading. We should probably be using the ground
-        // course instead to improve the accuracy in wind
-        int32_t heading_cd = ahrs.yaw_sensor;
-
-        int32_t heading_err_cd = wrap_180_cd(bearing_cd - heading_cd);
- 
-        /*
-          Check to see if the the plane is heading toward the land
-          waypoint
-          We use 10 degrees of slop so that we can handle 100
-          degrees/second of yaw
-        */
-        if (abs(heading_err_cd) <= 1000) {
-            //Want to head in a straight line from _here_ to the next waypoint.
-            //DON'T want to head in a line from the center of the loiter to 
-            //the next waypoint.
-            //Therefore: mark the "last" (next_wp_loc is about to be updated)
-            //wp lat/lon as the current location.
-            next_WP_loc = current_loc;
-            return true;
-        } else {
-            return false;
-        }
-    } 
-
-    return true;
 }
 
 static bool verify_RTL()

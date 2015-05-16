@@ -99,19 +99,29 @@ typedef enum GeofenceEnableReason {
 #define STOP_REPEAT 10
 
 
-// Logging message types
+// Logging message types. NOTE: If you change the value of one
+// of these then existing logs will break! Only add at the end, and 
+// mark unused ones as 'deprecated', but leave them in
 enum log_messages {
     LOG_CTUN_MSG,
     LOG_NTUN_MSG,
     LOG_PERFORMANCE_MSG,
+    LOG_CMD_MSG_DEPRECATED,     // deprecated
+    LOG_CURRENT_MSG_DEPRECATED,
     LOG_STARTUP_MSG,
     TYPE_AIRSTART_MSG,
     TYPE_GROUNDSTART_MSG,
+    LOG_CAMERA_MSG_DEPRECATED,
+    LOG_ATTITUDE_MSG_DEPRECATED,
+    LOG_MODE_MSG_DEPRECATED,
+    LOG_COMPASS_MSG_DEPRECATED,
     LOG_TECS_MSG,
     LOG_RC_MSG,
     LOG_SONAR_MSG,
+    LOG_COMPASS2_MSG_DEPRECATED,
     LOG_ARM_DISARM_MSG,
-    LOG_STATUS_MSG 
+    LOG_AIRSPEED_MSG_DEPRECATED, // deprecated
+    LOG_COMPASS3_MSG_DEPRECATED
 #if OPTFLOW == ENABLED
     ,LOG_OPTFLOW_MSG
 #endif
@@ -134,7 +144,6 @@ enum log_messages {
 #define MASK_LOG_SONAR                  (1<<14)
 #define MASK_LOG_ARM_DISARM             (1<<15)
 #define MASK_LOG_WHEN_DISARMED          (1UL<<16)
-#define MASK_LOG_IMU_RAW                (1UL<<19)
 
 // Waypoint Modes
 // ----------------
